@@ -1,0 +1,5 @@
+*.json
+*.xlsx
+*.db
+vendor/
+rvtools
