@@ -29,41 +29,90 @@ var (
 	SelectDatastoreStmt = `
 WITH expanded AS (
        SELECT
-           *,
-           trim(unnest(string_split(Hosts, ','))) AS ip
-       FROM vdatastore
-       WHERE "Cluster name" IS NOT NULL
+           d.*,
+           trim(unnest(string_split(d.Hosts, ','))) AS ip,
+           regexp_extract(d."Address", 'vmhba[0-9]+') as hba_device
+       FROM vdatastore d
+       WHERE d."Hosts" IS NOT NULL
+   ),
+   with_host AS (
+       SELECT DISTINCT
+           vh."Cluster",
+           e."Address",
+           e."Name",
+           e."Free MiB",
+           e."MHA",
+           e."Capacity MiB",
+           e."Type",
+           e.ip,
+           vh."Object ID",
+           e.hba_device
+       FROM expanded e
+       JOIN vhost vh ON vh.Host = e.ip
+   ),
+   with_hba AS (
+       SELECT DISTINCT
+           w."Cluster",
+           w."Address",
+           w."Name",
+           w."Free MiB",
+           w."MHA",
+           w."Capacity MiB",
+           w."Type",
+           w.ip,
+           w."Object ID",
+           FIRST(hba."Type") OVER (PARTITION BY w."Name") as hba_type
+       FROM with_host w
+       LEFT JOIN vhba hba ON hba."Device" = w.hba_device
    )
    SELECT
-       e."Cluster name" as "cluster",
-       e."Name" as "diskId",
+       w."Cluster" as "cluster",
+       COALESCE(w."Address", w."Name") as "diskId",
+       (w."Free MiB"::double / 1024)::integer as "freeCapacityGB",
+       (w."MHA" = 'True') as "hardwareAcceleratedMove",
+       COALESCE(string_agg(DISTINCT w."Object ID", ', '), 'N/A') AS "hostId",
+       'N/A' as "model",
+       CASE
+           WHEN w."Type" = 'NFS' THEN 'N/A'
+           WHEN w."Address" LIKE 'naa.%' THEN 'iSCSI'
+           WHEN w.hba_type IS NOT NULL THEN w.hba_type
+           ELSE 'N/A'
+       END as "protocolType",
+       (w."Capacity MiB"::double / 1024)::integer as "totalCapacityGB",
+       COALESCE(w."Type", 'N/A') as "type",
+       'N/A' as "vendor"
+   FROM with_hba w
+   WHERE w."Cluster" IS NOT NULL
+   GROUP BY w."Cluster", w."Address", w."Name", w."Free MiB", w."MHA", w."Capacity MiB", w."Type", w.hba_type;
+`
+
+	SelectDatastoreSimpleStmt = `
+WITH expanded AS (
+       SELECT
+           d.*,
+           trim(unnest(string_split(d.Hosts, ','))) AS ip
+       FROM vdatastore d
+       WHERE d."Hosts" IS NOT NULL
+   )
+   SELECT
+       vh."Cluster" as "cluster",
+       COALESCE(e."Address", e."Name") as "diskId",
        (e."Free MiB"::double / 1024)::integer as "freeCapacityGB",
        (e."MHA" = 'True') as "hardwareAcceleratedMove",
-       COALESCE(string_agg(h."Object ID", ', '), 'N/A') AS "hostId",
+       COALESCE(string_agg(DISTINCT vh."Object ID", ', '), 'N/A') AS "hostId",
        'N/A' as "model",
-       'N/A' as "protocolType",
+       CASE
+           WHEN e."Type" = 'NFS' THEN 'N/A'
+           WHEN e."Address" LIKE 'naa.%' THEN 'iSCSI'
+           ELSE 'N/A'
+       END as "protocolType",
        (e."Capacity MiB"::double / 1024)::integer as "totalCapacityGB",
        COALESCE(e."Type", 'N/A') as "type",
        'N/A' as "vendor"
    FROM expanded e
-   LEFT JOIN vhost h ON h.Host = e.ip
-   GROUP BY ALL;
-`
-
-	SelectDatastoreSimpleStmt = `
-   SELECT
-       "Cluster name" as "cluster",
-       "Name" as "diskId",
-       ("Free MiB"::double / 1024)::integer as "freeCapacityGB",
-       ("MHA" = 'True') as "hardwareAcceleratedMove",
-       'N/A' AS "hostId",
-       'N/A' as "model",
-       'N/A' as "protocolType",
-       ("Capacity MiB"::double / 1024)::integer as "totalCapacityGB",
-       COALESCE("Type", 'N/A') as "type",
-       'N/A' as "vendor"
-   FROM vdatastore
-   WHERE "Cluster name" IS NOT NULL;
+   JOIN vhost vh ON vh.Host = e.ip
+   WHERE vh."Cluster" IS NOT NULL
+   GROUP BY vh."Cluster", e."Address", e."Name", e."Free MiB", e."MHA", e."Capacity MiB", e."Type";
 `
 
 	SelectHostStmt = `

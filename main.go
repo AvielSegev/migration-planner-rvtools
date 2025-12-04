@@ -96,8 +96,12 @@ func readExcel(db *sql.DB, excelFile string) int {
 }
 
 func readDatastore(ctx context.Context, db *sql.DB) ([]definitions.Datastore, error) {
-	query := definitions.SelectDatastoreStmt
 	if !tableExists(db, "vhost") {
+		return nil, nil
+	}
+
+	query := definitions.SelectDatastoreStmt
+	if !tableExists(db, "vhba") {
 		query = definitions.SelectDatastoreSimpleStmt
 	}
 
