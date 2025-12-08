@@ -1,22 +1,49 @@
 package definitions
 
 var (
-	Sheets = []string{
-		"vInfo",
-		"vCPU",
-		"vMemory",
-		"vDisk",
-		"vPartition",
-		"vHost",
-		"vDatastore",
-		"vNetwork",
-		"vCluster",
-		"dvSwitch",
-		"vHBA",
-		"dvPort",
-	}
+	// CreateTableStmts maps sheet names to their CREATE TABLE statements with only required columns
+	CreateTableStmts = map[string]string{
+		"vInfo": `CREATE TABLE vinfo AS SELECT
+			"OS according to the VMware Tools"
+			FROM read_xlsx('%s', sheet='vInfo', all_varchar=true);`,
 
-	CreateTableStmt = `CREATE TABLE %s AS SELECT * FROM read_xlsx("%s",sheet="%s",all_varchar=true);`
+		"vDatastore": `CREATE TABLE vdatastore AS SELECT
+			"Hosts",
+			"Address",
+			"Name",
+			"Free MiB",
+			"MHA",
+			"Capacity MiB",
+			"Type"
+			FROM read_xlsx('%s', sheet='vDatastore', all_varchar=true);`,
+
+		"vHost": `CREATE TABLE vhost AS SELECT
+			"Cluster",
+			"Host",
+			"Object ID",
+			"# Cores",
+			"# CPU",
+			"# Memory",
+			"Model",
+			"Vendor"
+			FROM read_xlsx('%s', sheet='vHost', all_varchar=true);`,
+
+		"vHBA": `CREATE TABLE vhba AS SELECT
+			"Device",
+			"Type"
+			FROM read_xlsx('%s', sheet='vHBA', all_varchar=true);`,
+
+		"vNetwork": `CREATE TABLE vnetwork AS SELECT
+			"Cluster",
+			"Switch",
+			"Network"
+			FROM read_xlsx('%s', sheet='vNetwork', all_varchar=true);`,
+
+		"dvPort": `CREATE TABLE dvport AS SELECT
+			"Port",
+			"VLAN"
+			FROM read_xlsx('%s', sheet='dvPort', all_varchar=true);`,
+	}
 
 	SelectOsStmt = `SELECT
 		"OS according to the VMware Tools" as "name",

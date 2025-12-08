@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/duckdb/duckdb-go/v2"
 	"github.com/georgysavva/scany/v2/sqlscan"
@@ -85,9 +84,9 @@ func tableExists(db *sql.DB, table string) bool {
 
 func readExcel(db *sql.DB, excelFile string) int {
 	countSheet := 0
-	for _, s := range definitions.Sheets {
-		if _, err := db.Exec(fmt.Sprintf(definitions.CreateTableStmt, strings.ToLower(s), excelFile, s)); err != nil {
-			log.Printf("failed to create sheet %s: %v", s, err)
+	for sheetName, query := range definitions.CreateTableStmts {
+		if _, err := db.Exec(fmt.Sprintf(query, excelFile)); err != nil {
+			log.Printf("failed to create table for sheet %s: %v", sheetName, err)
 			continue
 		}
 		countSheet++
