@@ -98,32 +98,32 @@ func (p *Parser) Parse() (models.Inventory, error) {
 	}
 
 	// Read all data
-	datastores, err := p.readDatastores(ctx, queries)
+	datastores, err := p.readDatastores(ctx, queries[Datastore])
 	if err != nil {
 		return models.Inventory{}, fmt.Errorf("reading datastores: %w", err)
 	}
 
-	hosts, err := p.readHosts(ctx, queries)
+	hosts, err := p.readHosts(ctx, queries[Host])
 	if err != nil {
 		return models.Inventory{}, fmt.Errorf("reading hosts: %w", err)
 	}
 
-	networks, err := p.readNetworks(ctx, queries)
+	networks, err := p.readNetworks(ctx, queries[Network])
 	if err != nil {
 		return models.Inventory{}, fmt.Errorf("reading networks: %w", err)
 	}
 
-	vms, err := p.readVMs(ctx, queries)
+	vms, err := p.readVMs(ctx, queries[VM])
 	if err != nil {
 		return models.Inventory{}, fmt.Errorf("reading VMs: %w", err)
 	}
 
-	osSummary, err := p.readOs(ctx, queries)
+	osSummary, err := p.readOs(ctx, queries[Os])
 	if err != nil {
 		return models.Inventory{}, fmt.Errorf("reading OS summary: %w", err)
 	}
 
-	vcenterId, err := p.readVCenterId(ctx, queries)
+	vcenterId, err := p.readVCenterId(ctx, queries[VCenter])
 	if err != nil {
 		return models.Inventory{}, fmt.Errorf("reading vCenter ID: %w", err)
 	}
@@ -176,79 +176,73 @@ func (p *Parser) buildSchemaContext() (*SchemaContext, error) {
 	return ctx, nil
 }
 
-func (p *Parser) readDatastores(ctx context.Context, queries map[Type]string) ([]models.Datastore, error) {
-	q, ok := queries[Datastore]
-	if !ok {
+func (p *Parser) readDatastores(ctx context.Context, query string) ([]models.Datastore, error) {
+	if query == "" {
 		return nil, nil
 	}
 
 	var results []models.Datastore
-	if err := sqlscan.Select(ctx, p.db, &results, q); err != nil {
+	if err := sqlscan.Select(ctx, p.db, &results, query); err != nil {
 		return nil, fmt.Errorf("scanning datastores: %w", err)
 	}
 	return results, nil
 }
 
-func (p *Parser) readHosts(ctx context.Context, queries map[Type]string) ([]models.Host, error) {
-	q, ok := queries[Host]
-	if !ok {
+func (p *Parser) readHosts(ctx context.Context, query string) ([]models.Host, error) {
+	if query == "" {
 		return nil, nil
 	}
 
 	var results []models.Host
-	if err := sqlscan.Select(ctx, p.db, &results, q); err != nil {
+	if err := sqlscan.Select(ctx, p.db, &results, query); err != nil {
 		return nil, fmt.Errorf("scanning hosts: %w", err)
 	}
 	return results, nil
 }
 
-func (p *Parser) readNetworks(ctx context.Context, queries map[Type]string) ([]models.Network, error) {
-	q, ok := queries[Network]
-	if !ok {
+func (p *Parser) readNetworks(ctx context.Context, query string) ([]models.Network, error) {
+	if query == "" {
 		return nil, nil
 	}
 
 	var results []models.Network
-	if err := sqlscan.Select(ctx, p.db, &results, q); err != nil {
+	if err := sqlscan.Select(ctx, p.db, &results, query); err != nil {
 		return nil, fmt.Errorf("scanning networks: %w", err)
 	}
 	return results, nil
 }
 
-func (p *Parser) readOs(ctx context.Context, queries map[Type]string) ([]models.Os, error) {
-	q, ok := queries[Os]
-	if !ok {
+func (p *Parser) readOs(ctx context.Context, query string) ([]models.Os, error) {
+	if query == "" {
 		return nil, nil
 	}
 
 	var results []models.Os
-	if err := sqlscan.Select(ctx, p.db, &results, q); err != nil {
+	if err := sqlscan.Select(ctx, p.db, &results, query); err != nil {
 		return nil, fmt.Errorf("scanning OS: %w", err)
 	}
 	return results, nil
 }
 
-func (p *Parser) readVCenterId(ctx context.Context, queries map[Type]string) (string, error) {
-	q, ok := queries[VCenter]
-	if !ok {
+func (p *Parser) readVCenterId(ctx context.Context, query string) (string, error) {
+	if query == "" {
 		return "", nil
 	}
 
 	var vcenterId string
-	row := p.db.QueryRowContext(ctx, q)
+	row := p.db.QueryRowContext(ctx, query)
 	if err := row.Scan(&vcenterId); err != nil {
 		return "", nil // Not an error if no vCenter ID found
 	}
 	return vcenterId, nil
 }
 
-func (p *Parser) readVMs(ctx context.Context, queries map[Type]string) ([]models.VM, error) {
-	q, ok := queries[VM]
-	if !ok {
+func (p *Parser) readVMs(ctx context.Context, query string) ([]models.VM, error) {
+	if query == "" {
 		return nil, nil
 	}
 
-	rows, err := p.db.QueryContext(ctx, q)
+	rows, err := p.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("querying VMs: %w", err)
 	}
