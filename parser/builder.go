@@ -12,6 +12,9 @@ import (
 //go:embed templates/ingest_rvtools.go.tmpl
 var ingestRvtoolsTemplate string
 
+//go:embed templates/ingest_sqlite.go.tmpl
+var ingestSqliteTemplate string
+
 //go:embed templates/vm_query.go.tmpl
 var vmQueryTemplate string
 
@@ -99,10 +102,18 @@ func NewBuilder() *QueryBuilder {
 	return &QueryBuilder{}
 }
 
+type ingestParams struct {
+	FilePath string
+}
+
 // IngestRvtoolsQuery returns a query that creates all tables from an RVTools Excel file.
-// The returned query contains %s placeholders for the Excel file path.
-func (b *QueryBuilder) IngestRvtoolsQuery() string {
-	return b.buildQuery("ingest_rvtools", ingestRvtoolsTemplate, nil)
+func (b *QueryBuilder) IngestRvtoolsQuery(filePath string) string {
+	return b.buildQuery("ingest_rvtools", ingestRvtoolsTemplate, ingestParams{FilePath: filePath})
+}
+
+// IngestSqliteQuery returns a query that creates RVTools-shaped tables from a forklift SQLite database.
+func (b *QueryBuilder) IngestSqliteQuery(filePath string) string {
+	return b.buildQuery("ingest_sqlite", ingestSqliteTemplate, ingestParams{FilePath: filePath})
 }
 
 // Build generates all SQL queries based on the schema context.

@@ -1,14 +1,13 @@
 {{- /*
 Ingest RVTools Template - Creates tables from Excel sheets.
 All tables use CREATE TABLE AS SELECT * to preserve all columns.
-The %s placeholder is replaced with the Excel file path at runtime.
 */ -}}
-CREATE TABLE IF NOT EXISTS vinfo AS SELECT * FROM read_xlsx('%s', sheet='vInfo', all_varchar=true);
-CREATE TABLE IF NOT EXISTS vcpu AS SELECT * FROM read_xlsx('%s', sheet='vCPU', all_varchar=true);
-CREATE TABLE IF NOT EXISTS vmemory AS SELECT * FROM read_xlsx('%s', sheet='vMemory', all_varchar=true);
-CREATE TABLE IF NOT EXISTS vdisk AS SELECT * FROM read_xlsx('%s', sheet='vDisk', all_varchar=true);
-CREATE TABLE IF NOT EXISTS vdatastore AS SELECT * FROM read_xlsx('%s', sheet='vDatastore', all_varchar=true);
-CREATE TABLE IF NOT EXISTS vhost AS SELECT * FROM read_xlsx('%s', sheet='vHost', all_varchar=true);
-CREATE TABLE IF NOT EXISTS vhba AS SELECT * FROM read_xlsx('%s', sheet='vHBA', all_varchar=true);
-CREATE TABLE IF NOT EXISTS vnetwork AS SELECT * FROM read_xlsx('%s', sheet='vNetwork', all_varchar=true);
-CREATE TABLE IF NOT EXISTS dvport AS SELECT * FROM read_xlsx('%s', sheet='dvPort', all_varchar=true);
+CREATE TABLE IF NOT EXISTS vinfo AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vInfo', all_varchar=true);
+CREATE TABLE IF NOT EXISTS vcpu AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vCPU', all_varchar=true);
+CREATE TABLE IF NOT EXISTS vmemory AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vMemory', all_varchar=true);
+CREATE TABLE IF NOT EXISTS vdisk AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vDisk', all_varchar=true);
+CREATE TABLE IF NOT EXISTS vdatastore AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vDatastore', all_varchar=true);
+CREATE TABLE IF NOT EXISTS vhost AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vHost', all_varchar=true);
+CREATE TABLE IF NOT EXISTS vhba AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vHBA', all_varchar=true);
+CREATE TABLE IF NOT EXISTS vnetwork AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vNetwork', all_varchar=true);
+CREATE TABLE IF NOT EXISTS dvport AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='dvPort', all_varchar=true);

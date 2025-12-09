@@ -20,7 +20,7 @@ type rvToolsPreprocessor struct {
 }
 
 func (pp *rvToolsPreprocessor) Process(db *sql.DB) error {
-	query := strings.ReplaceAll(pp.builder.IngestRvtoolsQuery(), "%s", pp.excelFile)
+	query := pp.builder.IngestRvtoolsQuery(pp.excelFile)
 	for stmt := range strings.SplitSeq(query, ";") {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
@@ -32,11 +32,37 @@ func (pp *rvToolsPreprocessor) Process(db *sql.DB) error {
 	return nil
 }
 
+type sqlitePreprocessor struct {
+	sqliteFile string
+	builder    *QueryBuilder
+}
+
+func (pp *sqlitePreprocessor) Process(db *sql.DB) error {
+	query := pp.builder.IngestSqliteQuery(pp.sqliteFile)
+	for stmt := range strings.SplitSeq(query, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("executing statement: %w", err)
+		}
+	}
+	return nil
+}
+
 func NewRvToolParser(db *sql.DB, excelFile string) *Parser {
 	p := NewParser(db)
 	return p.WithPreprocessor(&rvToolsPreprocessor{
 		builder:   NewBuilder(),
 		excelFile: excelFile,
+	})
+}
+func NewSqliteParser(db *sql.DB, sqliteFile string) *Parser {
+	p := NewParser(db)
+	return p.WithPreprocessor(&sqlitePreprocessor{
+		sqliteFile: sqliteFile,
+		builder:    NewBuilder(),
 	})
 }
 

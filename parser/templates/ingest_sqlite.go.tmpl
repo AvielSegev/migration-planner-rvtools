@@ -1,0 +1,237 @@
+{{- /*
+Ingest SQLite Template - Creates RVTools-shaped tables from forklift SQLite database.
+
+This template transforms the normalized forklift/vsphere model schema into the flat
+RVTools-style tables (vinfo, vcpu, vmemory, vdisk, vnetwork, vhost, vdatastore, etc.)
+so the same query templates can be used for both Excel and SQLite sources.
+
+Key transformations:
+
+1. VM → vinfo: Direct 1:1 field mapping with derived Cluster and Datacenter.
+   - Cluster is derived via: VM.Host → Host.Cluster → Cluster.Name
+   - Datacenter is derived via: Host.Cluster → Cluster.Parent → Folder.Datacenter → Datacenter.Name
+   - VCenter ID comes from About.InstanceUuid
+
+2. VM.NICs (JSON array) → vnetwork rows:
+   - Uses LATERAL unnest(from_json(...)) to expand JSON array into rows
+   - Each NIC becomes a separate vnetwork row
+   - Network name is resolved by joining on Network table via nic.network.id
+
+3. VM.Disks (JSON array) → vdisk rows:
+   - Uses LATERAL unnest(from_json(...)) to expand JSON array into rows
+   - Each disk becomes a separate vdisk row
+   - Capacity converted from bytes to MiB
+
+4. Host → vhost:
+   - Host ID is used as "Host" column (not hostname) for datastore join compatibility
+   - MemoryBytes converted to MiB
+   - Cluster/Datacenter derived same as VM
+
+5. Datastore → vdatastore:
+   - Cluster is derived via Host.Datastores JSON array (unnested to find which hosts use each datastore)
+   - "Hosts" column contains comma-separated host IDs for compatibility with datastore query
+   - Capacity/Free converted from bytes to MiB
+
+6. Network → dvport:
+   - Only networks with non-empty DVSwitch are included
+   - VlanId and switch info extracted
+
+7. vhba: Empty table - forklift doesn't store HBA data in the same format
+*/ -}}
+
+INSTALL sqlite;
+LOAD sqlite;
+ATTACH '{{.FilePath}}' AS src (TYPE sqlite);
+
+-- vinfo: Main VM table with cluster/datacenter derived from Host → Cluster → Folder → Datacenter
+CREATE TABLE vinfo AS
+SELECT
+    v.ID AS "VM ID",
+    v.Name AS "VM",
+    v.Folder AS "Folder ID",
+    v.Host AS "Host",
+    v.UUID AS "SMBIOS UUID",
+    v.Firmware AS "Firmware",
+    v.PowerState AS "Powerstate",
+    v.ConnectionState AS "Connection state",
+    CASE WHEN v.FaultToleranceEnabled = 1 THEN 'Protected' ELSE 'Not protected' END AS "FT State",
+    v.CpuCount AS "CPUs",
+    v.MemoryMB AS "Memory",
+    v.GuestName AS "OS according to the configuration file",
+    v.GuestNameFromVmwareTools AS "OS according to the VMware Tools",
+    v.HostName AS "DNS Name",
+    v.IpAddress AS "Primary IP Address",
+    v.StorageUsed / 1048576 AS "In Use MiB",
+    CASE WHEN v.IsTemplate = 1 THEN 'True' ELSE 'False' END AS "Template",
+    CASE WHEN v.ChangeTrackingEnabled = 1 THEN 'True' ELSE 'False' END AS "CBT",
+    CASE WHEN v.DiskEnableUuid = 1 THEN 'True' ELSE 'False' END AS "EnableUUID",
+    d.Name AS "Datacenter",
+    c.Name AS "Cluster",
+    '' AS "HW version",
+    0 AS "Total disk capacity MiB",
+    0 AS "Provisioned MiB",
+    '' AS "Resource pool",
+    about.InstanceUuid AS "VI SDK UUID"
+FROM src.VM v
+LEFT JOIN src.Host h ON v.Host = h.ID
+LEFT JOIN src.Cluster c ON h.Cluster = c.ID
+LEFT JOIN src.Folder f ON c.Parent->>'id' = f.ID
+LEFT JOIN src.Datacenter d ON f.Datacenter = d.ID
+CROSS JOIN (SELECT InstanceUuid FROM src.About LIMIT 1) about;
+
+-- vcpu: CPU details per VM
+CREATE TABLE vcpu AS
+SELECT
+    v.ID AS "VM ID",
+    v.Name AS "VM",
+    h.ID AS "Host",
+    c.Name AS "Cluster",
+    d.Name AS "Datacenter",
+    v.CpuCount / NULLIF(v.CoresPerSocket, 0) AS "Sockets",
+    v.CoresPerSocket AS "Cores p/s",
+    v.CpuCount AS "CPUs",
+    CASE WHEN v.CpuHotAddEnabled = 1 THEN 'True' ELSE 'False' END AS "Hot Add",
+    CASE WHEN v.CpuHotRemoveEnabled = 1 THEN 'True' ELSE 'False' END AS "Hot Remove"
+FROM src.VM v
+LEFT JOIN src.Host h ON v.Host = h.ID
+LEFT JOIN src.Cluster c ON h.Cluster = c.ID
+LEFT JOIN src.Folder f ON c.Parent->>'id' = f.ID
+LEFT JOIN src.Datacenter d ON f.Datacenter = d.ID;
+
+-- vmemory: Memory details per VM
+CREATE TABLE vmemory AS
+SELECT
+    v.ID AS "VM ID",
+    v.Name AS "VM",
+    h.ID AS "Host",
+    c.Name AS "Cluster",
+    d.Name AS "Datacenter",
+    v.MemoryMB AS "Memory",
+    CASE WHEN v.MemoryHotAddEnabled = 1 THEN 'True' ELSE 'False' END AS "Hot Add",
+    v.BalloonedMemory AS "Ballooned"
+FROM src.VM v
+LEFT JOIN src.Host h ON v.Host = h.ID
+LEFT JOIN src.Cluster c ON h.Cluster = c.ID
+LEFT JOIN src.Folder f ON c.Parent->>'id' = f.ID
+LEFT JOIN src.Datacenter d ON f.Datacenter = d.ID;
+
+-- vdisk: Disk details - unnest JSON Disks array
+CREATE TABLE vdisk AS
+SELECT
+    v.ID AS "VM ID",
+    v.Name AS "VM",
+    h.ID AS "Host",
+    c.Name AS "Cluster",
+    d.Name AS "Datacenter",
+    disk->>'key' AS "Disk Key",
+    disk->>'unitNumber' AS "Unit #",
+    disk->>'file' AS "Path",
+    disk->>'file' AS "Disk Path",
+    (disk->>'capacity')::bigint / 1048576 AS "Capacity MiB",
+    CASE WHEN disk->>'shared' = 'true' THEN 'sharingMultiWriter' ELSE 'sharingNone' END AS "Sharing mode",
+    CASE WHEN disk->>'rdm' = 'true' THEN 'True' ELSE 'False' END AS "Raw",
+    disk->>'bus' AS "Shared Bus",
+    disk->>'mode' AS "Disk Mode",
+    disk->>'serial' AS "Disk UUID",
+    'False' AS "Thin",
+    disk->>'bus' AS "Controller",
+    '' AS "Label",
+    disk->>'unitNumber' AS "SCSI Unit #"
+FROM src.VM v
+LEFT JOIN src.Host h ON v.Host = h.ID
+LEFT JOIN src.Cluster c ON h.Cluster = c.ID
+LEFT JOIN src.Folder f ON c.Parent->>'id' = f.ID
+LEFT JOIN src.Datacenter d ON f.Datacenter = d.ID,
+LATERAL unnest(from_json(v.Disks, '[{"key":"INTEGER","unitNumber":"INTEGER","file":"VARCHAR","capacity":"BIGINT","shared":"BOOLEAN","rdm":"BOOLEAN","bus":"VARCHAR","mode":"VARCHAR","serial":"VARCHAR"}]')) AS t(disk)
+WHERE v.Disks != '[]';
+
+-- vnetwork: Network interface details - unnest JSON NICs array
+CREATE TABLE vnetwork AS
+SELECT
+    v.ID AS "VM ID",
+    v.Name AS "VM",
+    h.ID AS "Host",
+    c.Name AS "Cluster",
+    d.Name AS "Datacenter",
+    n.Name AS "Network",
+    nic->>'mac' AS "Mac Address",
+    '' AS "NIC label",
+    '' AS "Adapter",
+    COALESCE(n.DVSwitch->>'id', '') AS "Switch",
+    'True' AS "Connected",
+    'True' AS "Starts Connected",
+    CASE WHEN n.DVSwitch->>'id' IS NOT NULL THEN 'distributed' ELSE 'standard' END AS "Type",
+    v.IpAddress AS "IPv4 Address",
+    '' AS "IPv6 Address"
+FROM src.VM v
+LEFT JOIN src.Host h ON v.Host = h.ID
+LEFT JOIN src.Cluster c ON h.Cluster = c.ID
+LEFT JOIN src.Folder f ON c.Parent->>'id' = f.ID
+LEFT JOIN src.Datacenter d ON f.Datacenter = d.ID,
+LATERAL unnest(from_json(v.NICs, '[{"network":{"kind":"VARCHAR","id":"VARCHAR"},"mac":"VARCHAR","order":"INTEGER","deviceKey":"INTEGER"}]')) AS t(nic)
+LEFT JOIN src.Network n ON nic->'network'->>'id' = n.ID
+WHERE v.NICs != '[]';
+
+-- vhost: Host details (use ID as "Host" for datastore join compatibility)
+CREATE TABLE vhost AS
+SELECT
+    h.ID AS "Host",
+    c.Name AS "Cluster",
+    d.Name AS "Datacenter",
+    h.ID AS "Object ID",
+    h.CpuSockets AS "# CPU",
+    h.CpuCores AS "# Cores",
+    h.MemoryBytes / 1048576 AS "# Memory",
+    h.Model AS "Model",
+    h.Vendor AS "Vendor"
+FROM src.Host h
+LEFT JOIN src.Cluster c ON h.Cluster = c.ID
+LEFT JOIN src.Folder f ON c.Parent->>'id' = f.ID
+LEFT JOIN src.Datacenter d ON f.Datacenter = d.ID;
+
+-- vdatastore: Datastore details with Cluster derived from Host.Datastores
+CREATE TABLE vdatastore AS
+SELECT
+    ds.Name AS "Name",
+    ds.Name AS "Address",
+    string_agg(DISTINCT h.ID, ',') AS "Hosts",
+    ds.Free / 1048576 AS "Free MiB",
+    ds.Capacity / 1048576 AS "Capacity MiB",
+    ds.MaintenanceMode AS "MHA",
+    ds.Type AS "Type",
+    dc.Name AS "Datacenter",
+    c.Name AS "Cluster"
+FROM src.Datastore ds
+LEFT JOIN src.Folder f ON ds.Parent->>'id' = f.ID
+LEFT JOIN src.Datacenter dc ON f.Datacenter = dc.ID
+LEFT JOIN (
+    SELECT h.ID, h.Cluster, dsref->>'id' AS datastore_id
+    FROM src.Host h,
+    LATERAL unnest(from_json(h.Datastores, '[{"kind":"VARCHAR","id":"VARCHAR"}]')) AS t(dsref)
+) h ON h.datastore_id = ds.ID
+LEFT JOIN src.Cluster c ON h.Cluster = c.ID
+GROUP BY ds.ID, ds.Name, ds.Free, ds.Capacity, ds.MaintenanceMode, ds.Type, dc.Name, c.Name;
+
+-- dvport: Distributed virtual port - extract from Network
+CREATE TABLE dvport AS
+SELECT
+    n.Name AS "Port",
+    n.VlanId AS "VLAN",
+    n.DVSwitch->>'id' AS "Switch",
+    d.Name AS "Datacenter"
+FROM src.Network n
+LEFT JOIN src.Folder f ON n.Parent->>'id' = f.ID
+LEFT JOIN src.Datacenter d ON f.Datacenter = d.ID
+WHERE COALESCE(n.DVSwitch->>'id', '') != '';
+
+-- vhba: Empty for now - forklift doesn't have HBA data in same format
+CREATE TABLE vhba AS
+SELECT
+    '' AS "Host",
+    '' AS "Device",
+    '' AS "Type",
+    '' AS "Model",
+    '' AS "Status"
+WHERE 1=0;
+
+DETACH src;

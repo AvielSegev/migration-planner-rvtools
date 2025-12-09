@@ -14,14 +14,23 @@ import (
 )
 
 var (
-	excelFile string
-	dbPath    string
+	excelFile  string
+	sqliteFile string
+	dbPath     string
 )
 
 func main() {
-	flag.StringVar(&excelFile, "excel-file", "", "path of excel file")
+	flag.StringVar(&excelFile, "excel-file", "", "path of RVTools excel file")
+	flag.StringVar(&sqliteFile, "sqlite-file", "", "path of forklift sqlite file")
 	flag.StringVar(&dbPath, "db-path", "", "Path to db file")
 	flag.Parse()
+
+	if excelFile == "" && sqliteFile == "" {
+		log.Fatal("either -excel-file or -sqlite-file must be provided")
+	}
+	if excelFile != "" && sqliteFile != "" {
+		log.Fatal("only one of -excel-file or -sqlite-file can be provided")
+	}
 
 	c, err := duckdb.NewConnector(dbPath, nil)
 	if err != nil {
@@ -37,10 +46,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := parser.NewRvToolParser(db, excelFile)
+	var p *parser.Parser
+	if excelFile != "" {
+		p = parser.NewRvToolParser(db, excelFile)
+	} else {
+		p = parser.NewSqliteParser(db, sqliteFile)
+	}
+
 	inventory, err := p.Parse()
 	if err != nil {
-		log.Fatalf("parsing RVTools: %v", err)
+		log.Fatalf("parsing: %v", err)
 	}
 
 	data, _ := json.MarshalIndent(inventory, "", "  ")
