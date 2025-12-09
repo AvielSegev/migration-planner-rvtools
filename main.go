@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
 
@@ -31,6 +32,8 @@ func main() {
 	if excelFile != "" && sqliteFile != "" {
 		log.Fatal("only one of -excel-file or -sqlite-file can be provided")
 	}
+
+	now := time.Now()
 
 	c, err := duckdb.NewConnector(dbPath, nil)
 	if err != nil {
@@ -57,6 +60,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("parsing: %v", err)
 	}
+
+	fmt.Printf("parsing time: %s\n", time.Since(now))
 
 	data, _ := json.MarshalIndent(inventory, "", "  ")
 	fmt.Println(string(data))

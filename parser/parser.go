@@ -20,8 +20,16 @@ type rvToolsPreprocessor struct {
 }
 
 func (pp *rvToolsPreprocessor) Process(db *sql.DB) error {
-	_, err := db.Exec(pp.builder.IngestRvtoolsQuery(pp.excelFile))
-	return err
+	query := pp.builder.IngestRvtoolsQuery(pp.excelFile)
+	for _, line := range strings.Split(query, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Ignore errors for missing sheets
+		db.Exec(line)
+	}
+	return nil
 }
 
 type sqlitePreprocessor struct {

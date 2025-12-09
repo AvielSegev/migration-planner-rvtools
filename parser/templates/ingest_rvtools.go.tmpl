@@ -1,6 +1,7 @@
 {{- /*
 Ingest RVTools Template - Creates tables from Excel sheets.
 All tables use CREATE TABLE AS SELECT * to preserve all columns.
+Each line is executed separately to handle missing sheets.
 */ -}}
 CREATE TABLE IF NOT EXISTS vinfo AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vInfo', all_varchar=true);
 CREATE TABLE IF NOT EXISTS vcpu AS SELECT * FROM read_xlsx('{{.FilePath}}', sheet='vCPU', all_varchar=true);
