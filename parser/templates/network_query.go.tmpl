@@ -1,0 +1,58 @@
+{{- /*
+Network Query Template - Generates DuckDB SQL based on available tables.
+
+This template dynamically builds a query to extract network data from RVTools Excel exports.
+The query adapts based on whether the dvPort table exists for VLAN information.
+
+Template Parameters:
+  - HasDvPort: true if dvport table exists (enables VLAN extraction)
+
+Example Output (with dvPort - full version):
+  SELECT
+      n."Cluster" as "cluster",
+      COALESCE(n."Switch", '') as "dvswitch",
+      n."Network" as "name",
+      'distributed' as "type",
+      COALESCE(p."VLAN", '') as "vlanId",
+      COUNT(*)::integer as "vmsCount"
+  FROM vnetwork n
+  LEFT JOIN dvport p ON n."Network" = p."Port"
+  WHERE n."Cluster" IS NOT NULL
+  GROUP BY n."Cluster", n."Switch", n."Network", p."VLAN";
+
+Example Output (without dvPort - simple version):
+  SELECT
+      "Cluster" as "cluster",
+      COALESCE("Switch", '') as "dvswitch",
+      "Network" as "name",
+      'distributed' as "type",
+      '' as "vlanId",
+      COUNT(*)::integer as "vmsCount"
+  FROM vnetwork
+  WHERE "Cluster" IS NOT NULL
+  GROUP BY "Cluster", "Switch", "Network";
+*/ -}}
+{{- if .HasDvPort -}}
+SELECT
+    n."Cluster" as "cluster",
+    COALESCE(n."Switch", '') as "dvswitch",
+    n."Network" as "name",
+    'distributed' as "type",
+    COALESCE(p."VLAN", '') as "vlanId",
+    COUNT(*)::integer as "vmsCount"
+FROM vnetwork n
+LEFT JOIN dvport p ON n."Network" = p."Port"
+WHERE n."Cluster" IS NOT NULL
+GROUP BY n."Cluster", n."Switch", n."Network", p."VLAN";
+{{- else -}}
+SELECT
+    "Cluster" as "cluster",
+    COALESCE("Switch", '') as "dvswitch",
+    "Network" as "name",
+    'distributed' as "type",
+    '' as "vlanId",
+    COUNT(*)::integer as "vmsCount"
+FROM vnetwork
+WHERE "Cluster" IS NOT NULL
+GROUP BY "Cluster", "Switch", "Network";
+{{- end }}

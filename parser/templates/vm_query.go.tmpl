@@ -1,0 +1,192 @@
+{{- /*
+VM Query Template - Generates DuckDB SQL based on available tables and columns.
+
+This template dynamically builds a query to extract VM data from RVTools Excel exports.
+Different RVTools versions may have different sheets and column names, so the template
+adapts based on what's available in the database.
+
+Template Parameters:
+  - HasVDisk:              true if vdisk table exists
+  - HasVNetwork:           true if vnetwork table exists
+  - HasVCpu:               true if vcpu table exists
+  - HasVMemory:            true if vmemory table exists
+  - HasSharingMode:        true if vdisk has "Sharing mode" column
+  - HasDiskUUID:           true if vdisk has "Disk UUID" column
+  - HasTotalDiskCapacityMiB: true if vinfo has "Total disk capacity MiB" column
+  - HasProvisionedMiB:     true if vinfo has "Provisioned MiB" column
+  - HasResourcePool:       true if vinfo has "Resource pool" column
+  - FolderColumn:          "Folder ID" or "Folder" depending on version
+  - UUIDColumn:            "SMBIOS UUID" or "VM UUID" depending on version
+  - DiskPathColumn:        "Path" or "Disk Path" depending on version
+  - NetworkColumns:        Comma-separated list of network columns (e.g., i."Network #1", i."Network #2", ...)
+
+Example Output (full RVTools with all tables):
+  WITH disks AS (
+      SELECT "VM ID", LIST({...}) AS disks FROM vdisk GROUP BY "VM ID"
+  ),
+  nics AS (
+      SELECT "VM ID", LIST({...}) AS nics FROM vnetwork GROUP BY "VM ID"
+  )
+  SELECT ... FROM vinfo i
+  LEFT JOIN vcpu c ON i."VM ID" = c."VM ID"
+  LEFT JOIN vmemory m ON i."VM ID" = m."VM ID"
+  LEFT JOIN disks d ON i."VM ID" = d."VM ID"
+  LEFT JOIN nics n ON i."VM ID" = n."VM ID";
+
+Example Output (minimal RVTools - only vinfo, vcpu, vmemory, vdisk):
+  WITH disks AS (
+      SELECT "VM ID", LIST({...}) AS disks FROM vdisk GROUP BY "VM ID"
+  )
+  SELECT ...
+      [] AS "NICs",                    -- empty array, no vnetwork table
+  FROM vinfo i
+  LEFT JOIN vcpu c ON i."VM ID" = c."VM ID"
+  LEFT JOIN vmemory m ON i."VM ID" = m."VM ID"
+  LEFT JOIN disks d ON i."VM ID" = d."VM ID";
+
+Example Output (minimal RVTools - only vinfo):
+  SELECT ...
+      false AS "CpuHotAddEnabled",     -- defaults, no vcpu table
+      0 AS "BalloonedMemory",          -- defaults, no vmemory table
+      [] AS "Disks",                   -- empty array, no vdisk table
+      [] AS "NICs",                    -- empty array, no vnetwork table
+  FROM vinfo i;
+*/ -}}
+{{- if .HasVDisk -}}
+WITH disks AS (
+    SELECT
+        "VM ID",
+        LIST({
+            'Key': "Disk Key",
+            'UnitNumber': "Unit #",
+            'File': "{{ .DiskPathColumn }}",
+            'Capacity': "Capacity MiB",
+{{- if .HasSharingMode }}
+            'Shared': "Sharing mode",
+{{- else }}
+            'Shared': false,
+{{- end }}
+            'RDM': "Raw",
+            'Bus': "Shared Bus",
+            'Mode': "Disk Mode",
+{{- if .HasDiskUUID }}
+            'Serial': "Disk UUID",
+{{- else }}
+            'Serial': '',
+{{- end }}
+            'Thin': "Thin",
+            'Controller': "Controller",
+            'Label': "Label",
+            'SCSIUnit': "SCSI Unit #"
+        }) AS disks
+    FROM vdisk
+    GROUP BY "VM ID"
+){{ if .HasVNetwork }},{{ end }}
+{{- end }}
+{{- if .HasVNetwork }}
+nics AS (
+    SELECT
+        "VM ID",
+        LIST({
+            'Network': "Network",
+            'MAC': "Mac Address",
+            'Label': "NIC label",
+            'Adapter': "Adapter",
+            'Switch': "Switch",
+            'Connected': LOWER("Connected") IN ('true', '1', 'yes'),
+            'StartsConnected': LOWER("Starts Connected") IN ('true', '1', 'yes'),
+            'Type': "Type",
+            'IPv4Address': CASE WHEN "IPv4 Address" = 'VM' OR "IPv4 Address" IS NULL THEN '' ELSE "IPv4 Address" END,
+            'IPv6Address': CASE WHEN "IPv6 Address" = 'VM' OR "IPv6 Address" IS NULL THEN '' ELSE "IPv6 Address" END
+        }) AS nics
+    FROM vnetwork
+    GROUP BY "VM ID"
+)
+{{- end }}
+SELECT
+    -- vinfo fields
+    COALESCE(i."VM ID", '') AS "ID",
+    COALESCE(i."VM", '') AS "Name",
+    COALESCE(i."{{ .FolderColumn }}", '') AS "Folder",
+    COALESCE(i."Host", '') AS "Host",
+    COALESCE(i."{{ .UUIDColumn }}", '') AS "UUID",
+    COALESCE(i."Firmware", '') AS "Firmware",
+    COALESCE(i."Powerstate", '') AS "PowerState",
+    COALESCE(i."Connection state", '') AS "ConnectionState",
+    (i."FT State" IS NOT NULL AND i."FT State" != '' AND i."FT State" != 'notConfigured') AS "FaultToleranceEnabled",
+    TRY_CAST(i."CPUs" AS INTEGER) AS "CpuCount",
+    TRY_CAST(i."Memory" AS INTEGER) AS "MemoryMB",
+    COALESCE(i."OS according to the configuration file", '') AS "GuestName",
+    COALESCE(i."OS according to the VMware Tools", '') AS "GuestNameFromVmwareTools",
+    COALESCE(i."DNS Name", '') AS "HostName",
+    COALESCE(i."Primary IP Address", '') AS "IpAddress",
+    TRY_CAST(i."In Use MiB" AS INTEGER) AS "StorageUsed",
+    (i."Template" IS NOT NULL AND LOWER(i."Template") IN ('true', '1', 'yes')) AS "IsTemplate",
+    (i."CBT" IS NOT NULL AND LOWER(i."CBT") IN ('true', '1', 'yes')) AS "ChangeTrackingEnabled",
+    (i."EnableUUID" IS NOT NULL AND LOWER(i."EnableUUID") IN ('true', '1', 'yes')) AS "DiskEnableUuid",
+    COALESCE(i."Datacenter", '') AS "Datacenter",
+    COALESCE(i."Cluster", '') AS "Cluster",
+    COALESCE(i."HW version", '') AS "HWVersion",
+{{- if .HasTotalDiskCapacityMiB }}
+    TRY_CAST(i."Total disk capacity MiB" AS INTEGER) AS "TotalDiskCapacityMiB",
+{{- else }}
+    0 AS "TotalDiskCapacityMiB",
+{{- end }}
+{{- if .HasProvisionedMiB }}
+    TRY_CAST(i."Provisioned MiB" AS INTEGER) AS "ProvisionedMiB",
+{{- else }}
+    0 AS "ProvisionedMiB",
+{{- end }}
+{{- if .HasResourcePool }}
+    COALESCE(i."Resource pool", '') AS "ResourcePool",
+{{- else }}
+    '' AS "ResourcePool",
+{{- end }}
+    -- vcpu fields
+{{- if .HasVCpu }}
+    COALESCE(c."Hot Add" IS NOT NULL AND LOWER(c."Hot Add") IN ('true', '1', 'yes'), false) AS "CpuHotAddEnabled",
+    COALESCE(c."Hot Remove" IS NOT NULL AND LOWER(c."Hot Remove") IN ('true', '1', 'yes'), false) AS "CpuHotRemoveEnabled",
+    COALESCE(TRY_CAST(c."Sockets" AS INTEGER), 0) AS "CpuSockets",
+    COALESCE(TRY_CAST(c."Cores p/s" AS INTEGER), 0) AS "CoresPerSocket",
+{{- else }}
+    false AS "CpuHotAddEnabled",
+    false AS "CpuHotRemoveEnabled",
+    0 AS "CpuSockets",
+    0 AS "CoresPerSocket",
+{{- end }}
+    -- vmemory fields
+{{- if .HasVMemory }}
+    COALESCE(m."Hot Add" IS NOT NULL AND LOWER(m."Hot Add") IN ('true', '1', 'yes'), false) AS "MemoryHotAddEnabled",
+    COALESCE(TRY_CAST(m."Ballooned" AS INTEGER), 0) AS "BalloonedMemory",
+{{- else }}
+    false AS "MemoryHotAddEnabled",
+    0 AS "BalloonedMemory",
+{{- end }}
+    -- nested arrays
+{{- if .HasVDisk }}
+    COALESCE(d.disks, []) AS "Disks",
+{{- else }}
+    [] AS "Disks",
+{{- end }}
+{{- if .HasVNetwork }}
+    COALESCE(n.nics, []) AS "NICs",
+{{- else }}
+    [] AS "NICs",
+{{- end }}
+    LIST_FILTER(
+        LIST_VALUE({{ .NetworkColumns }}),
+        x -> x IS NOT NULL AND x != '' AND x != 'VM'
+    ) AS "Networks"
+FROM vinfo i
+{{- if .HasVCpu }}
+LEFT JOIN vcpu c ON i."VM ID" = c."VM ID"
+{{- end }}
+{{- if .HasVMemory }}
+LEFT JOIN vmemory m ON i."VM ID" = m."VM ID"
+{{- end }}
+{{- if .HasVDisk }}
+LEFT JOIN disks d ON i."VM ID" = d."VM ID"
+{{- end }}
+{{- if .HasVNetwork }}
+LEFT JOIN nics n ON i."VM ID" = n."VM ID"
+{{- end }};
