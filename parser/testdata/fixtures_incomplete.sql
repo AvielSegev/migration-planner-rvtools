@@ -36,12 +36,32 @@ CREATE TABLE vinfo (
     "Network #2" VARCHAR,
     "Network #3" VARCHAR,
     "Network #4" VARCHAR,
-    "Network #5" VARCHAR
+    "Network #5" VARCHAR,
+    "Network #6" VARCHAR,
+    "Network #7" VARCHAR,
+    "Network #8" VARCHAR,
+    "Network #9" VARCHAR,
+    "Network #10" VARCHAR,
+    "Network #11" VARCHAR,
+    "Network #12" VARCHAR,
+    "Network #13" VARCHAR,
+    "Network #14" VARCHAR,
+    "Network #15" VARCHAR,
+    "Network #16" VARCHAR,
+    "Network #17" VARCHAR,
+    "Network #18" VARCHAR,
+    "Network #19" VARCHAR,
+    "Network #20" VARCHAR,
+    "Network #21" VARCHAR,
+    "Network #22" VARCHAR,
+    "Network #23" VARCHAR,
+    "Network #24" VARCHAR,
+    "Network #25" VARCHAR
 );
 
-INSERT INTO vinfo VALUES
-('vm-001', 'test-vm-1', 'folder-1', 'folder-1', 'host-001', 'uuid-001', 'uuid-001', 'bios', 'poweredOn', 'connected', 'Not protected', 4, 8192, 'Red Hat Enterprise Linux 8', 'RHEL 8.5', 'testvm1.example.com', '192.168.1.10', 50000, false, true, true, 'TestDC', 'TestCluster', 'vmx-19', 102400, 204800, 'Resources', 'vcenter-uuid-001', 'network-001', 'network-002', NULL, NULL, NULL),
-('vm-002', 'test-vm-2', 'folder-1', 'folder-1', 'host-001', 'uuid-002', 'uuid-002', 'efi', 'poweredOff', 'connected', 'Not protected', 2, 4096, 'Microsoft Windows Server 2019', 'Windows 2019', 'testvm2.example.com', '192.168.1.11', 30000, false, false, false, 'TestDC', 'TestCluster', 'vmx-17', 51200, 102400, 'Resources', 'vcenter-uuid-001', 'network-001', NULL, NULL, NULL, NULL);
+INSERT INTO vinfo ("VM ID", "VM", "Folder ID", "Folder", "Host", "SMBIOS UUID", "VM UUID", "Firmware", "Powerstate", "Connection state", "FT State", "CPUs", "Memory", "OS according to the configuration file", "OS according to the VMware Tools", "DNS Name", "Primary IP Address", "In Use MiB", "Template", "CBT", "EnableUUID", "Datacenter", "Cluster", "HW version", "Total disk capacity MiB", "Provisioned MiB", "Resource pool", "VI SDK UUID", "Network #1", "Network #2") VALUES
+('vm-001', 'test-vm-1', 'folder-1', 'folder-1', 'host-001', 'uuid-001', 'uuid-001', 'bios', 'poweredOn', 'connected', 'Not protected', 4, 8192, 'Red Hat Enterprise Linux 8', 'RHEL 8.5', 'testvm1.example.com', '192.168.1.10', 50000, false, true, true, 'TestDC', 'TestCluster', 'vmx-19', 102400, 204800, 'Resources', 'vcenter-uuid-001', 'network-001', 'network-002'),
+('vm-002', 'test-vm-2', 'folder-1', 'folder-1', 'host-001', 'uuid-002', 'uuid-002', 'efi', 'poweredOff', 'connected', 'Not protected', 2, 4096, 'Microsoft Windows Server 2019', 'Windows 2019', 'testvm2.example.com', '192.168.1.11', 30000, false, false, false, 'TestDC', 'TestCluster', 'vmx-17', 51200, 102400, 'Resources', 'vcenter-uuid-001', 'network-001', NULL);
 
 -- vcpu: CPU details
 CREATE TABLE vcpu (

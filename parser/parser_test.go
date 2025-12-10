@@ -26,7 +26,7 @@ var createForkliftSQL string
 
 const sqliteTestDB = "/tmp/forklift_test.db"
 
-func setupDB(sqlFixtures string) (*sql.DB, *parser.SchemaContext) {
+func setupDB(sqlFixtures string) *sql.DB {
 	c, err := duckdb.NewConnector("", nil)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -36,44 +36,26 @@ func setupDB(sqlFixtures string) (*sql.DB, *parser.SchemaContext) {
 	_, err = db.Exec(sqlFixtures)
 	Expect(err).NotTo(HaveOccurred())
 
-	ctx := &parser.SchemaContext{
-		Tables:  make(map[string]bool),
-		Columns: make(map[string]map[string]bool),
-	}
+	return db
+}
 
-	rows, err := db.Query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'")
-	Expect(err).NotTo(HaveOccurred())
-	for rows.Next() {
-		var t string
-		Expect(rows.Scan(&t)).To(Succeed())
-		ctx.Tables[t] = true
-		ctx.Columns[t] = make(map[string]bool)
+func tableExists(db *sql.DB, tableName string) bool {
+	rows, err := db.Query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name = ?", tableName)
+	if err != nil {
+		return false
 	}
-	rows.Close()
-
-	colRows, err := db.Query("SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'main'")
-	Expect(err).NotTo(HaveOccurred())
-	for colRows.Next() {
-		var t, c string
-		Expect(colRows.Scan(&t, &c)).To(Succeed())
-		if ctx.Columns[t] != nil {
-			ctx.Columns[t][c] = true
-		}
-	}
-	colRows.Close()
-
-	return db, ctx
+	defer rows.Close()
+	return rows.Next()
 }
 
 var _ = Describe("QueryBuilder", func() {
 	var (
 		db      *sql.DB
 		builder *parser.QueryBuilder
-		ctx     *parser.SchemaContext
 	)
 
 	BeforeEach(func() {
-		db, ctx = setupDB(fixturesSQL)
+		db = setupDB(fixturesSQL)
 		builder = parser.NewBuilder()
 	})
 
@@ -85,7 +67,7 @@ var _ = Describe("QueryBuilder", func() {
 
 	Describe("Host Query", func() {
 		It("returns all hosts with correct fields", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Host]
@@ -129,7 +111,7 @@ var _ = Describe("QueryBuilder", func() {
 
 	Describe("Network Query", func() {
 		It("returns networks with VM counts", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Network]
@@ -175,7 +157,7 @@ var _ = Describe("QueryBuilder", func() {
 
 	Describe("OS Query", func() {
 		It("returns OS distribution summary", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Os]
@@ -205,7 +187,7 @@ var _ = Describe("QueryBuilder", func() {
 
 	Describe("VCenter Query", func() {
 		It("returns vCenter UUID", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.VCenter]
@@ -220,7 +202,7 @@ var _ = Describe("QueryBuilder", func() {
 
 	Describe("Datastore Query", func() {
 		It("returns datastores with capacity info", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Datastore]
@@ -269,7 +251,6 @@ var _ = Describe("SQLite ingestion", func() {
 	var (
 		db      *sql.DB
 		builder *parser.QueryBuilder
-		ctx     *parser.SchemaContext
 	)
 
 	BeforeEach(func() {
@@ -304,33 +285,6 @@ var _ = Describe("SQLite ingestion", func() {
 			}
 			_, _ = db.Exec(stmt) // Ignore errors for missing tables
 		}
-
-		// Build schema context
-		ctx = &parser.SchemaContext{
-			Tables:  make(map[string]bool),
-			Columns: make(map[string]map[string]bool),
-		}
-
-		rows, err := db.Query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'")
-		Expect(err).NotTo(HaveOccurred())
-		for rows.Next() {
-			var t string
-			Expect(rows.Scan(&t)).To(Succeed())
-			ctx.Tables[t] = true
-			ctx.Columns[t] = make(map[string]bool)
-		}
-		rows.Close()
-
-		colRows, err := db.Query("SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'main'")
-		Expect(err).NotTo(HaveOccurred())
-		for colRows.Next() {
-			var t, c string
-			Expect(colRows.Scan(&t, &c)).To(Succeed())
-			if ctx.Columns[t] != nil {
-				ctx.Columns[t][c] = true
-			}
-		}
-		colRows.Close()
 	})
 
 	AfterEach(func() {
@@ -340,20 +294,20 @@ var _ = Describe("SQLite ingestion", func() {
 	})
 
 	It("creates all RVTools tables", func() {
-		Expect(ctx.Tables["vinfo"]).To(BeTrue())
-		Expect(ctx.Tables["vcpu"]).To(BeTrue())
-		Expect(ctx.Tables["vmemory"]).To(BeTrue())
-		Expect(ctx.Tables["vdisk"]).To(BeTrue())
-		Expect(ctx.Tables["vnetwork"]).To(BeTrue())
-		Expect(ctx.Tables["vhost"]).To(BeTrue())
-		Expect(ctx.Tables["vdatastore"]).To(BeTrue())
-		Expect(ctx.Tables["dvport"]).To(BeTrue())
-		Expect(ctx.Tables["vhba"]).To(BeTrue())
+		Expect(tableExists(db, "vinfo")).To(BeTrue())
+		Expect(tableExists(db, "vcpu")).To(BeTrue())
+		Expect(tableExists(db, "vmemory")).To(BeTrue())
+		Expect(tableExists(db, "vdisk")).To(BeTrue())
+		Expect(tableExists(db, "vnetwork")).To(BeTrue())
+		Expect(tableExists(db, "vhost")).To(BeTrue())
+		Expect(tableExists(db, "vdatastore")).To(BeTrue())
+		Expect(tableExists(db, "dvport")).To(BeTrue())
+		Expect(tableExists(db, "vhba")).To(BeTrue())
 	})
 
 	Describe("Host Query", func() {
 		It("returns hosts from SQLite", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Host]
@@ -396,7 +350,7 @@ var _ = Describe("SQLite ingestion", func() {
 
 	Describe("Network Query", func() {
 		It("returns networks with VLAN from dvport", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Network]
@@ -434,7 +388,7 @@ var _ = Describe("SQLite ingestion", func() {
 
 	Describe("VM Query", func() {
 		It("returns VMs from SQLite", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.VM]
@@ -454,7 +408,7 @@ var _ = Describe("SQLite ingestion", func() {
 
 	Describe("OS Query", func() {
 		It("returns OS distribution from SQLite", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Os]
@@ -484,7 +438,7 @@ var _ = Describe("SQLite ingestion", func() {
 
 	Describe("VCenter Query", func() {
 		It("returns vCenter UUID from About table", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.VCenter]
@@ -499,7 +453,7 @@ var _ = Describe("SQLite ingestion", func() {
 
 	Describe("Datastore Query", func() {
 		It("returns datastores from SQLite", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Datastore]
@@ -522,11 +476,10 @@ var _ = Describe("QueryBuilder with incomplete fixtures", func() {
 	var (
 		db      *sql.DB
 		builder *parser.QueryBuilder
-		ctx     *parser.SchemaContext
 	)
 
 	BeforeEach(func() {
-		db, ctx = setupDB(fixturesIncompleteSQL)
+		db = setupDB(fixturesIncompleteSQL)
 		builder = parser.NewBuilder()
 	})
 
@@ -537,16 +490,16 @@ var _ = Describe("QueryBuilder with incomplete fixtures", func() {
 	})
 
 	It("has dvport table (empty)", func() {
-		Expect(ctx.Tables["dvport"]).To(BeTrue())
+		Expect(tableExists(db, "dvport")).To(BeTrue())
 	})
 
 	It("has vhba table (empty)", func() {
-		Expect(ctx.Tables["vhba"]).To(BeTrue())
+		Expect(tableExists(db, "vhba")).To(BeTrue())
 	})
 
 	Describe("Host Query", func() {
 		It("returns hosts without HBA data", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Host]
@@ -566,7 +519,7 @@ var _ = Describe("QueryBuilder with incomplete fixtures", func() {
 
 	Describe("Network Query", func() {
 		It("returns networks without VLAN data from dvport", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Network]
@@ -608,7 +561,7 @@ var _ = Describe("QueryBuilder with incomplete fixtures", func() {
 
 	Describe("VM Query", func() {
 		It("returns VMs", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.VM]
@@ -628,7 +581,7 @@ var _ = Describe("QueryBuilder with incomplete fixtures", func() {
 
 	Describe("OS Query", func() {
 		It("returns OS distribution", func() {
-			queries, err := builder.Build(ctx)
+			queries, err := builder.Build()
 			Expect(err).NotTo(HaveOccurred())
 
 			q, ok := queries[parser.Os]

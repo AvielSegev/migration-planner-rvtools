@@ -62,38 +62,34 @@ func (pp *sqlitePreprocessor) Process(db *sql.DB) error {
 }
 
 func NewRvToolParser(db *sql.DB, excelFile string) *Parser {
-	p := NewParser(db)
-	return p.WithPreprocessor(&rvToolsPreprocessor{
+	p := newParser(db)
+	p.preprocessor = &rvToolsPreprocessor{
 		builder:   NewBuilder(),
 		excelFile: excelFile,
-	})
+	}
+	return p
 }
 
 func NewSqliteParser(db *sql.DB, sqliteFile string) *Parser {
-	p := NewParser(db)
-	return p.WithPreprocessor(&sqlitePreprocessor{
+	p := newParser(db)
+	p.preprocessor = &sqlitePreprocessor{
 		sqliteFile: sqliteFile,
 		builder:    NewBuilder(),
-	})
+	}
+	return p
 }
 
 type Parser struct {
-	db            *sql.DB
-	builder       *QueryBuilder
-	preprocessors []Preprocessor
+	db           *sql.DB
+	builder      *QueryBuilder
+	preprocessor Preprocessor
 }
 
-func NewParser(db *sql.DB) *Parser {
+func newParser(db *sql.DB) *Parser {
 	return &Parser{
-		db:            db,
-		builder:       NewBuilder(),
-		preprocessors: []Preprocessor{},
+		db:      db,
+		builder: NewBuilder(),
 	}
-}
-
-func (p *Parser) WithPreprocessor(pp Preprocessor) *Parser {
-	p.preprocessors = append(p.preprocessors, pp)
-	return p
 }
 
 func (p *Parser) Parse() (models.Inventory, error) {
@@ -103,10 +99,8 @@ func (p *Parser) Parse() (models.Inventory, error) {
 		return models.Inventory{}, fmt.Errorf("creating schema: %w", err)
 	}
 
-	for _, pp := range p.preprocessors {
-		if err := pp.Process(p.db); err != nil {
-			return models.Inventory{}, fmt.Errorf("failed to preprocess: %v", err)
-		}
+	if err := p.preprocessor.Process(p.db); err != nil {
+		return models.Inventory{}, fmt.Errorf("failed to preprocess: %v", err)
 	}
 
 	// Build queries based on available tables/columns
@@ -141,13 +135,13 @@ func (p *Parser) Parse() (models.Inventory, error) {
 		return models.Inventory{}, fmt.Errorf("reading OS summary: %w", err)
 	}
 
-	vcenterId, err := p.readVCenterId(ctx, queries[VCenter])
+	vcenterID, err := p.readVCenterID(ctx, queries[VCenter])
 	if err != nil {
 		return models.Inventory{}, fmt.Errorf("reading vCenter ID: %w", err)
 	}
 
 	// Build inventory grouped by cluster
-	inventory := p.buildInventory(vcenterId, datastores, hosts, networks, vms, osSummary)
+	inventory := p.buildInventory(vcenterID, datastores, hosts, networks, vms, osSummary)
 
 	return inventory, nil
 }
@@ -206,7 +200,7 @@ func (p *Parser) readOs(ctx context.Context, query string) ([]models.Os, error) 
 	return results, nil
 }
 
-func (p *Parser) readVCenterId(ctx context.Context, query string) (string, error) {
+func (p *Parser) readVCenterID(ctx context.Context, query string) (string, error) {
 	if query == "" {
 		return "", nil
 	}
@@ -279,7 +273,7 @@ func (p *Parser) readVMs(ctx context.Context, query string) ([]models.VM, error)
 	return vms, nil
 }
 
-func (p *Parser) buildInventory(vcenterId string, datastores []models.Datastore, hosts []models.Host, networks []models.Network, vms []models.VM, osSummary []models.Os) models.Inventory {
+func (p *Parser) buildInventory(vcenterID string, datastores []models.Datastore, hosts []models.Host, networks []models.Network, vms []models.VM, osSummary []models.Os) models.Inventory {
 	clusterMap := make(map[string]*models.InventoryData)
 
 	// Group datastores by cluster
@@ -338,7 +332,7 @@ func (p *Parser) buildInventory(vcenterId string, datastores []models.Datastore,
 	}
 
 	return models.Inventory{
-		VcenterId: vcenterId,
+		VcenterId: vcenterID,
 		Clusters:  clusters,
 		OsSummary: osSummary,
 	}
