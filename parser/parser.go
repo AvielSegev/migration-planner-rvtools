@@ -3,13 +3,15 @@ package parser
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/georgysavva/scany/v2/sqlscan"
-	"github.com/tupyy/rvtools/models"
 	"go.uber.org/zap"
+
+	"github.com/tupyy/rvtools/models"
 )
 
 type Preprocessor interface {
@@ -24,7 +26,10 @@ type rvToolsPreprocessor struct {
 var stmtRegex = regexp.MustCompile(`(?s)(CREATE|INSERT|UPDATE|DROP|WITH|INSTALL|LOAD|ATTACH|DETACH).*?;`)
 
 func (pp *rvToolsPreprocessor) Process(db *sql.DB) error {
-	query := pp.builder.IngestRvtoolsQuery(pp.excelFile)
+	query, err := pp.builder.IngestRvtoolsQuery(pp.excelFile)
+	if err != nil {
+		return err
+	}
 	stmts := stmtRegex.FindAllString(query, -1)
 	for _, stmt := range stmts {
 		stmt = strings.TrimSpace(stmt)
@@ -46,7 +51,10 @@ type sqlitePreprocessor struct {
 }
 
 func (pp *sqlitePreprocessor) Process(db *sql.DB) error {
-	query := pp.builder.IngestSqliteQuery(pp.sqliteFile)
+	query, err := pp.builder.IngestSqliteQuery(pp.sqliteFile)
+	if err != nil {
+		return err
+	}
 	stmts := stmtRegex.FindAllString(query, -1)
 	for _, stmt := range stmts {
 		stmt = strings.TrimSpace(stmt)
@@ -94,6 +102,10 @@ func newParser(db *sql.DB) *Parser {
 
 func (p *Parser) Parse() (models.Inventory, error) {
 	ctx := context.Background()
+
+	if p.preprocessor == nil {
+		return models.Inventory{}, errors.New("no preprocessor has been defined")
+	}
 
 	if err := p.createSchema(); err != nil {
 		return models.Inventory{}, fmt.Errorf("creating schema: %w", err)
@@ -147,16 +159,15 @@ func (p *Parser) Parse() (models.Inventory, error) {
 }
 
 func (p *Parser) createSchema() error {
-	q := p.builder.CreateSchemaQuery()
-	_, err := p.db.Exec(q)
+	q, err := p.builder.CreateSchemaQuery()
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(q)
 	return err
 }
 
 func (p *Parser) readDatastores(ctx context.Context, query string) ([]models.Datastore, error) {
-	if query == "" {
-		return nil, nil
-	}
-
 	var results []models.Datastore
 	if err := sqlscan.Select(ctx, p.db, &results, query); err != nil {
 		return nil, fmt.Errorf("scanning datastores: %w", err)
@@ -165,10 +176,6 @@ func (p *Parser) readDatastores(ctx context.Context, query string) ([]models.Dat
 }
 
 func (p *Parser) readHosts(ctx context.Context, query string) ([]models.Host, error) {
-	if query == "" {
-		return nil, nil
-	}
-
 	var results []models.Host
 	if err := sqlscan.Select(ctx, p.db, &results, query); err != nil {
 		return nil, fmt.Errorf("scanning hosts: %w", err)
@@ -177,10 +184,6 @@ func (p *Parser) readHosts(ctx context.Context, query string) ([]models.Host, er
 }
 
 func (p *Parser) readNetworks(ctx context.Context, query string) ([]models.Network, error) {
-	if query == "" {
-		return nil, nil
-	}
-
 	var results []models.Network
 	if err := sqlscan.Select(ctx, p.db, &results, query); err != nil {
 		return nil, fmt.Errorf("scanning networks: %w", err)
@@ -189,10 +192,6 @@ func (p *Parser) readNetworks(ctx context.Context, query string) ([]models.Netwo
 }
 
 func (p *Parser) readOs(ctx context.Context, query string) ([]models.Os, error) {
-	if query == "" {
-		return nil, nil
-	}
-
 	var results []models.Os
 	if err := sqlscan.Select(ctx, p.db, &results, query); err != nil {
 		return nil, fmt.Errorf("scanning OS: %w", err)
@@ -201,23 +200,15 @@ func (p *Parser) readOs(ctx context.Context, query string) ([]models.Os, error) 
 }
 
 func (p *Parser) readVCenterID(ctx context.Context, query string) (string, error) {
-	if query == "" {
-		return "", nil
-	}
-
-	var vcenterId string
+	var vcenterID string
 	row := p.db.QueryRowContext(ctx, query)
-	if err := row.Scan(&vcenterId); err != nil {
-		return "", nil // Not an error if no vCenter ID found
+	if err := row.Scan(&vcenterID); err != nil {
+		return "", fmt.Errorf("failed to find vcenter ID. it should be present: %s", query)
 	}
-	return vcenterId, nil
+	return vcenterID, nil
 }
 
 func (p *Parser) readVMs(ctx context.Context, query string) ([]models.VM, error) {
-	if query == "" {
-		return nil, nil
-	}
-
 	rows, err := p.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("querying VMs: %w", err)

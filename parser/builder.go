@@ -79,17 +79,17 @@ type ingestParams struct {
 }
 
 // CreateSchemaQuery returns queries to create all RVTools tables with proper schema.
-func (b *QueryBuilder) CreateSchemaQuery() string {
+func (b *QueryBuilder) CreateSchemaQuery() (string, error) {
 	return b.buildQuery("create_schema", createSchemaTemplate, nil)
 }
 
 // IngestRvtoolsQuery returns a query that inserts data from an RVTools Excel file into schema tables.
-func (b *QueryBuilder) IngestRvtoolsQuery(filePath string) string {
+func (b *QueryBuilder) IngestRvtoolsQuery(filePath string) (string, error) {
 	return b.buildQuery("ingest_rvtools", ingestRvtoolsTemplate, ingestParams{FilePath: filePath})
 }
 
 // IngestSqliteQuery returns a query that creates RVTools-shaped tables from a forklift SQLite database.
-func (b *QueryBuilder) IngestSqliteQuery(filePath string) string {
+func (b *QueryBuilder) IngestSqliteQuery(filePath string) (string, error) {
 	return b.buildQuery("ingest_sqlite", ingestSqliteTemplate, ingestParams{FilePath: filePath})
 }
 
@@ -97,12 +97,41 @@ func (b *QueryBuilder) IngestSqliteQuery(filePath string) string {
 func (b *QueryBuilder) Build() (map[Type]string, error) {
 	queries := make(map[Type]string)
 
-	queries[VM] = b.buildVMQuery()
-	queries[Os] = b.buildQuery("os_query", osQueryTemplate, nil)
-	queries[VCenter] = b.buildQuery("vcenter_query", vcenterQueryTemplate, nil)
-	queries[Datastore] = b.buildDatastoreQuery()
-	queries[Network] = b.buildNetworkQuery()
-	queries[Host] = b.buildQuery("host_query", hostQueryTemplate, nil)
+	q, err := b.buildVMQuery()
+	if err != nil {
+		return map[Type]string{}, fmt.Errorf("failed to build vm query: %v", err)
+	}
+	queries[VM] = q
+
+	q, err = b.buildQuery("os_query", osQueryTemplate, nil)
+	if err != nil {
+		return map[Type]string{}, fmt.Errorf("failed to build os_query: %v", err)
+	}
+	queries[Os] = q
+
+	q, err = b.buildQuery("vcenter_query", vcenterQueryTemplate, nil)
+	if err != nil {
+		return map[Type]string{}, fmt.Errorf("failed to build vcenter_query: %v", err)
+	}
+	queries[VCenter] = q
+
+	q, err = b.buildDatastoreQuery()
+	if err != nil {
+		return map[Type]string{}, fmt.Errorf("failed to build datastore query: %v", err)
+	}
+	queries[Datastore] = q
+
+	q, err = b.buildNetworkQuery()
+	if err != nil {
+		return map[Type]string{}, fmt.Errorf("fauled to build network query: %v", err)
+	}
+	queries[Network] = q
+
+	q, err = b.buildQuery("host_query", hostQueryTemplate, nil)
+	if err != nil {
+		return map[Type]string{}, fmt.Errorf("fauled to build host_query: %v", err)
+	}
+	queries[Host] = q
 
 	return queries, nil
 }
@@ -111,9 +140,10 @@ type vmQueryParams struct {
 	NetworkColumns string
 }
 
-func (b *QueryBuilder) buildVMQuery() string {
-	quoted := make([]string, 0, 25)
-	for i := 1; i <= 25; i++ {
+func (b *QueryBuilder) buildVMQuery() (string, error) {
+	const maxNetworkNumbers = 25
+	quoted := make([]string, 0, maxNetworkNumbers)
+	for i := 1; i <= maxNetworkNumbers; i++ {
 		quoted = append(quoted, fmt.Sprintf(`i."Network #%d"`, i))
 	}
 	networkColumns := strings.Join(quoted, ", ")
@@ -121,22 +151,22 @@ func (b *QueryBuilder) buildVMQuery() string {
 	return b.buildQuery("vm_query", vmQueryTemplate, vmQueryParams{NetworkColumns: networkColumns})
 }
 
-func (b *QueryBuilder) buildDatastoreQuery() string {
+func (b *QueryBuilder) buildDatastoreQuery() (string, error) {
 	return b.buildQuery("datastore_query", datastoreQueryTemplate, nil)
 }
 
-func (b *QueryBuilder) buildNetworkQuery() string {
+func (b *QueryBuilder) buildNetworkQuery() (string, error) {
 	return b.buildQuery("network_query", networkQueryTemplate, nil)
 }
 
-func (b *QueryBuilder) buildQuery(name, tmplContent string, params any) string {
+func (b *QueryBuilder) buildQuery(name, tmplContent string, params any) (string, error) {
 	tmpl, err := template.New(name).Parse(tmplContent)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, params); err != nil {
-		return ""
+		return "", err
 	}
-	return strings.TrimSpace(buf.String())
+	return strings.TrimSpace(buf.String()), nil
 }
