@@ -10,21 +10,34 @@ import (
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
+	"go.uber.org/zap"
 
 	"github.com/tupyy/rvtools/parser"
 )
 
 var (
-	excelFile  string
-	sqliteFile string
-	dbPath     string
+	excelFile       string
+	sqliteFile      string
+	dbPath          string
+	isTimingEnabled bool
+	debug           bool
 )
 
 func main() {
 	flag.StringVar(&excelFile, "excel-file", "", "path of RVTools excel file")
 	flag.StringVar(&sqliteFile, "sqlite-file", "", "path of forklift sqlite file")
 	flag.StringVar(&dbPath, "db-path", "", "Path to db file")
+	flag.BoolVar(&isTimingEnabled, "enable-timing", false, "enable timing the parsing op")
+	flag.BoolVar(&debug, "debug", false, "enable debug logging")
 	flag.Parse()
+
+	// Initialize zap logger
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		log.Fatalf("failed to initialize logger: %v", err)
+	}
+	zap.ReplaceGlobals(logger)
+	defer logger.Sync()
 
 	if excelFile == "" && sqliteFile == "" {
 		log.Fatal("either -excel-file or -sqlite-file must be provided")
@@ -61,7 +74,9 @@ func main() {
 		log.Fatalf("parsing: %v", err)
 	}
 
-	fmt.Printf("parsing time: %s\n", time.Since(now))
+	if isTimingEnabled {
+		fmt.Printf("parsing time: %s\n", time.Since(now))
+	}
 
 	data, _ := json.MarshalIndent(inventory, "", "  ")
 	fmt.Println(string(data))

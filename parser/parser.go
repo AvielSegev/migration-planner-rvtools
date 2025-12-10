@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/georgysavva/scany/v2/sqlscan"
 	"github.com/tupyy/rvtools/models"
+	"go.uber.org/zap"
 )
 
 type Preprocessor interface {
@@ -19,15 +21,21 @@ type rvToolsPreprocessor struct {
 	builder   *QueryBuilder
 }
 
+var stmtRegex = regexp.MustCompile(`(?s)(CREATE|INSERT|UPDATE|DROP|WITH|INSTALL|LOAD|ATTACH|DETACH).*?;`)
+
 func (pp *rvToolsPreprocessor) Process(db *sql.DB) error {
 	query := pp.builder.IngestRvtoolsQuery(pp.excelFile)
-	for _, line := range strings.Split(query, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	stmts := stmtRegex.FindAllString(query, -1)
+	for _, stmt := range stmts {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
 			continue
 		}
+		//		zap.S().Debugw("executing statement", "query", stmt)
 		// Ignore errors for missing sheets
-		db.Exec(line)
+		if _, err := db.Exec(stmt); err != nil {
+			zap.S().Debugw("statement failed", "error", err)
+		}
 	}
 	return nil
 }
@@ -38,8 +46,19 @@ type sqlitePreprocessor struct {
 }
 
 func (pp *sqlitePreprocessor) Process(db *sql.DB) error {
-	_, err := db.Exec(pp.builder.IngestSqliteQuery(pp.sqliteFile))
-	return err
+	query := pp.builder.IngestSqliteQuery(pp.sqliteFile)
+	stmts := stmtRegex.FindAllString(query, -1)
+	for _, stmt := range stmts {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		zap.S().Debugw("executing statement", "query", stmt)
+		if _, err := db.Exec(stmt); err != nil {
+			zap.S().Debugw("statement failed", "error", err)
+		}
+	}
+	return nil
 }
 
 func NewRvToolParser(db *sql.DB, excelFile string) *Parser {
@@ -49,6 +68,7 @@ func NewRvToolParser(db *sql.DB, excelFile string) *Parser {
 		excelFile: excelFile,
 	})
 }
+
 func NewSqliteParser(db *sql.DB, sqliteFile string) *Parser {
 	p := NewParser(db)
 	return p.WithPreprocessor(&sqlitePreprocessor{
@@ -78,6 +98,10 @@ func (p *Parser) WithPreprocessor(pp Preprocessor) *Parser {
 
 func (p *Parser) Parse() (models.Inventory, error) {
 	ctx := context.Background()
+
+	if err := p.createSchema(); err != nil {
+		return models.Inventory{}, fmt.Errorf("creating schema: %w", err)
+	}
 
 	for _, pp := range p.preprocessors {
 		if err := pp.Process(p.db); err != nil {
@@ -132,6 +156,12 @@ func (p *Parser) Parse() (models.Inventory, error) {
 	inventory := p.buildInventory(vcenterId, datastores, hosts, networks, vms, osSummary)
 
 	return inventory, nil
+}
+
+func (p *Parser) createSchema() error {
+	q := p.builder.CreateSchemaQuery()
+	_, err := p.db.Exec(q)
+	return err
 }
 
 func (p *Parser) buildSchemaContext() (*SchemaContext, error) {

@@ -9,6 +9,9 @@ import (
 	"text/template"
 )
 
+//go:embed templates/create_schema.go.tmpl
+var createSchemaTemplate string
+
 //go:embed templates/ingest_rvtools.go.tmpl
 var ingestRvtoolsTemplate string
 
@@ -106,7 +109,12 @@ type ingestParams struct {
 	FilePath string
 }
 
-// IngestRvtoolsQuery returns a query that creates all tables from an RVTools Excel file.
+// CreateSchemaQuery returns queries to create all RVTools tables with proper schema.
+func (b *QueryBuilder) CreateSchemaQuery() string {
+	return b.buildQuery("create_schema", createSchemaTemplate, nil)
+}
+
+// IngestRvtoolsQuery returns a query that inserts data from an RVTools Excel file into schema tables.
 func (b *QueryBuilder) IngestRvtoolsQuery(filePath string) string {
 	return b.buildQuery("ingest_rvtools", ingestRvtoolsTemplate, ingestParams{FilePath: filePath})
 }
@@ -131,19 +139,11 @@ func (b *QueryBuilder) Build(ctx *SchemaContext) (map[Type]string, error) {
 	}
 
 	if ctx.HasTable("vdatastore") && ctx.HasTable("vhost") {
-		query, err := b.buildDatastoreQuery(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("building datastore query: %w", err)
-		}
-		queries[Datastore] = query
+		queries[Datastore] = b.buildDatastoreQuery()
 	}
 
 	if ctx.HasTable("vnetwork") {
-		query, err := b.buildNetworkQuery(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("building network query: %w", err)
-		}
-		queries[Network] = query
+		queries[Network] = b.buildNetworkQuery()
 	}
 
 	if ctx.HasTable("vhost") {
@@ -154,86 +154,31 @@ func (b *QueryBuilder) Build(ctx *SchemaContext) (map[Type]string, error) {
 }
 
 type vmQueryParams struct {
-	HasVInfo                bool
-	HasVCpu                 bool
-	HasVMemory              bool
-	HasVDisk                bool
-	HasVNetwork             bool
-	FolderColumn            string
-	NetworkColumns          string
-	DiskPathColumn          string
-	UUIDColumn              string
-	HasSharingMode          bool
-	HasDiskUUID             bool
-	HasTotalDiskCapacityMiB bool
-	HasProvisionedMiB       bool
-	HasResourcePool         bool
+	NetworkColumns string
 }
 
 func (b *QueryBuilder) buildVMQuery(ctx *SchemaContext) (string, error) {
-	params := vmQueryParams{
-		HasVInfo:                true,
-		HasVCpu:                 ctx.HasTable("vcpu"),
-		HasVMemory:              ctx.HasTable("vmemory"),
-		HasVDisk:                ctx.HasTable("vdisk"),
-		HasVNetwork:             ctx.HasTable("vnetwork"),
-		FolderColumn:            "Folder ID",
-		DiskPathColumn:          "Path",
-		UUIDColumn:              "SMBIOS UUID",
-		HasTotalDiskCapacityMiB: ctx.HasColumn("vinfo", "Total disk capacity MiB"),
-		HasProvisionedMiB:       ctx.HasColumn("vinfo", "Provisioned MiB"),
-		HasResourcePool:         ctx.HasColumn("vinfo", "Resource pool"),
-	}
-
-	if ctx.HasColumn("vinfo", "Folder") && !ctx.HasColumn("vinfo", "Folder ID") {
-		params.FolderColumn = "Folder"
-	}
-	if ctx.HasColumn("vinfo", "VM UUID") && !ctx.HasColumn("vinfo", "SMBIOS UUID") {
-		params.UUIDColumn = "VM UUID"
-	}
-
 	networkCols := ctx.GetColumnsLike("vinfo", "Network #")
+	var networkColumns string
 	if len(networkCols) == 0 {
-		params.NetworkColumns = "NULL"
+		networkColumns = "NULL"
 	} else {
 		quoted := make([]string, len(networkCols))
 		for i, col := range networkCols {
 			quoted[i] = fmt.Sprintf(`i."%s"`, col)
 		}
-		params.NetworkColumns = strings.Join(quoted, ", ")
+		networkColumns = strings.Join(quoted, ", ")
 	}
 
-	if params.HasVDisk {
-		if ctx.HasColumn("vdisk", "Disk Path") && !ctx.HasColumn("vdisk", "Path") {
-			params.DiskPathColumn = "Disk Path"
-		}
-		params.HasSharingMode = ctx.HasColumn("vdisk", "Sharing mode")
-		params.HasDiskUUID = ctx.HasColumn("vdisk", "Disk UUID")
-	}
-
-	return b.buildQuery("vm_query", vmQueryTemplate, params), nil
+	return b.buildQuery("vm_query", vmQueryTemplate, vmQueryParams{NetworkColumns: networkColumns}), nil
 }
 
-type datastoreQueryParams struct {
-	HasVHBA bool
+func (b *QueryBuilder) buildDatastoreQuery() string {
+	return b.buildQuery("datastore_query", datastoreQueryTemplate, nil)
 }
 
-func (b *QueryBuilder) buildDatastoreQuery(ctx *SchemaContext) (string, error) {
-	params := datastoreQueryParams{
-		HasVHBA: ctx.HasTable("vhba"),
-	}
-	return b.buildQuery("datastore_query", datastoreQueryTemplate, params), nil
-}
-
-type networkQueryParams struct {
-	HasDvPort bool
-}
-
-func (b *QueryBuilder) buildNetworkQuery(ctx *SchemaContext) (string, error) {
-	params := networkQueryParams{
-		HasDvPort: ctx.HasTable("dvport"),
-	}
-	return b.buildQuery("network_query", networkQueryTemplate, params), nil
+func (b *QueryBuilder) buildNetworkQuery() string {
+	return b.buildQuery("network_query", networkQueryTemplate, nil)
 }
 
 func (b *QueryBuilder) buildQuery(name, tmplContent string, params any) string {

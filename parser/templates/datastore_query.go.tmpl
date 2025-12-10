@@ -1,36 +1,9 @@
 {{- /*
-Datastore Query Template - Generates DuckDB SQL based on available tables.
+Datastore Query Template - Extracts datastore data from the fixed schema.
 
-This template dynamically builds a query to extract datastore data from RVTools Excel exports.
-The query adapts based on whether the vHBA table exists for protocol type detection.
-
-Template Parameters:
-  - HasVHBA: true if vhba table exists (enables HBA-based protocol detection)
-
-Example Output (with vHBA - full version):
-  WITH expanded AS (
-      SELECT d.*, trim(unnest(string_split(d.Hosts, ','))) AS ip,
-             regexp_extract(d."Address", 'vmhba[0-9]+') as hba_device
-      FROM vdatastore d WHERE d."Hosts" IS NOT NULL
-  ),
-  with_host AS (...),
-  with_hba AS (
-      ... LEFT JOIN vhba hba ON hba."Device" = w.hba_device
-  )
-  SELECT ... hba_type as "protocolType" ...
-
-Example Output (without vHBA - simple version):
-  WITH expanded AS (
-      SELECT d.*, trim(unnest(string_split(d.Hosts, ','))) AS ip
-      FROM vdatastore d WHERE d."Hosts" IS NOT NULL
-  )
-  SELECT ...
-      CASE WHEN e."Type" = 'NFS' THEN 'N/A'
-           WHEN e."Address" LIKE 'naa.%' THEN 'iSCSI'
-           ELSE 'N/A' END as "protocolType"
-  ...
+The schema always has vdatastore, vhost, and vhba tables. LEFT JOIN handles
+cases where vhba is empty.
 */ -}}
-{{- if .HasVHBA -}}
 WITH expanded AS (
     SELECT
         d.*,
@@ -73,7 +46,7 @@ SELECT
     w."Cluster" as "cluster",
     COALESCE(w."Address", w."Name") as "diskId",
     (w."Free MiB"::double / 1024)::integer as "freeCapacityGB",
-    (w."MHA" = 'True') as "hardwareAcceleratedMove",
+    COALESCE(w."MHA", false) as "hardwareAcceleratedMove",
     COALESCE(string_agg(DISTINCT w."Object ID", ', '), 'N/A') AS "hostId",
     'N/A' as "model",
     CASE
@@ -88,31 +61,3 @@ SELECT
 FROM with_hba w
 WHERE w."Cluster" IS NOT NULL
 GROUP BY w."Cluster", w."Address", w."Name", w."Free MiB", w."MHA", w."Capacity MiB", w."Type", w.hba_type;
-{{- else -}}
-WITH expanded AS (
-    SELECT
-        d.*,
-        trim(unnest(string_split(d.Hosts, ','))) AS ip
-    FROM vdatastore d
-    WHERE d."Hosts" IS NOT NULL
-)
-SELECT
-    vh."Cluster" as "cluster",
-    COALESCE(e."Address", e."Name") as "diskId",
-    (e."Free MiB"::double / 1024)::integer as "freeCapacityGB",
-    (e."MHA" = 'True') as "hardwareAcceleratedMove",
-    COALESCE(string_agg(DISTINCT vh."Object ID", ', '), 'N/A') AS "hostId",
-    'N/A' as "model",
-    CASE
-        WHEN e."Type" = 'NFS' THEN 'N/A'
-        WHEN e."Address" LIKE 'naa.%' THEN 'iSCSI'
-        ELSE 'N/A'
-    END as "protocolType",
-    (e."Capacity MiB"::double / 1024)::integer as "totalCapacityGB",
-    COALESCE(e."Type", 'N/A') as "type",
-    'N/A' as "vendor"
-FROM expanded e
-JOIN vhost vh ON vh.Host = e.ip
-WHERE vh."Cluster" IS NOT NULL
-GROUP BY vh."Cluster", e."Address", e."Name", e."Free MiB", e."MHA", e."Capacity MiB", e."Type";
-{{- end }}
