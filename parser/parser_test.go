@@ -275,7 +275,7 @@ var _ = Describe("SQLite ingestion", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Execute SQLite ingestion (statement by statement to handle errors)
-		query := builder.IngestSqliteQuery(sqliteTestDB)
+		query, err := builder.IngestSqliteQuery(sqliteTestDB)
 		stmtRegex := regexp.MustCompile(`(?s)(CREATE|INSERT|UPDATE|DROP|WITH|INSTALL|LOAD|ATTACH|DETACH).*?;`)
 		stmts := stmtRegex.FindAllString(query, -1)
 		for _, stmt := range stmts {
